@@ -18,7 +18,7 @@ stages:
       - bash: echo $(PipeLineLevelVariables)
       - bash: echo $(Build.BuildNumber)
       - bash: echo $(Build.BuildId)
-      - bash: echo $(Build.BuildSourceDirectory)
+      - bash: echo $(Build.SourcesDirectory)
   - job: SecondJobs
     steps:
     - bash: echo $(System.DefaultWorkingDirectory)
