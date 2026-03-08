@@ -1,0 +1,137 @@
+# azure-pipelines.yml
+trigger:
+  branches:
+    include: [ main ]
+
+pool:
+  vmImage: 'ubuntu-24.04'   # Ubuntu 24.04 agent
+
+variables:
+  azureServiceConnection: 'YOUR-SERVICE-CONNECTION'
+  # Packer version to install
+  packerVersion: '1.10.0'
+  # Location & resource group to create the managed image (example)
+  location: 'eastus'
+  resourceGroup: 'rg-packer-azurearm-demo'
+  managedImageName: 'img-ubuntu-phpdemo'
+  # Source marketplace image (example: Ubuntu 22.04 Gen2)
+  imagePublisher: 'Canonical'
+  imageOffer: '0001-com-ubuntu-server-jammy'
+  imageSku: '22_04-lts-gen2'
+  # Azure plugin version constraint (HCL2)
+  azurePluginVersion: '~> 2.0'
+
+steps:
+# 1) Install Packer
+- bash: |
+    set -euo pipefail
+    curl -sSLo packer.zip "https://releases.hashicorp.com/packer/$(packerVersion)/packer_$(packerVersion)_linux_amd64.zip"
+    unzip -q packer.zip
+    sudo mv packer /usr/local/bin/packer
+    packer version
+  displayName: 'Install Packer'
+
+# 2) Add Packer HCL2 files to the workspace (required_plugins + builder + build)
+- bash: |
+    set -euo pipefail
+
+    # required_plugins (lets `packer init` auto-install the Azure plugin)
+    cat > packer.required_plugins.auto.pkr.hcl <<'HCL'
+packer {
+  required_plugins {
+    azure = {
+      source  = "github.com/hashicorp/azure"
+      version = "${azurePluginVersion}"
+    }
+  }
+}
+HCL
+
+    # Source and Build (azure-arm)
+    cat > azure-arm.pkr.hcl <<'HCL'
+variable "location"           { type = string }
+variable "resource_group"     { type = string }
+variable "managed_image_name" { type = string }
+
+variable "image_publisher" { type = string }
+variable "image_offer"     { type = string }
+variable "image_sku"       { type = string }
+
+# azure-arm builder using Azure CLI auth
+source "azure-arm" "ubuntu_base" {
+  use_azure_cli_auth               = true
+  location                         = var.location
+  managed_image_resource_group_name= var.resource_group
+  managed_image_name               = var.managed_image_name
+
+  # Base marketplace image (adjust as needed)
+  image_publisher = var.image_publisher
+  image_offer     = var.image_offer
+  image_sku       = var.image_sku
+
+  # VM size and disk example
+  vm_size         = "Standard_B2s"
+  os_type         = "Linux"
+  azure_tags = {
+    owner  = "devops"
+    source = "packer"
+  }
+}
+
+build {
+  name    = "azure-ubuntu-build"
+  sources = ["source.azure-arm.ubuntu_base"]
+
+  # simple provisioner just to prove provisioning works
+  provisioner "shell" {
+    inline = [
+      "echo 'Hello from Packer on Azure!' | sudo tee /hello.txt"
+    ]
+  }
+}
+HCL
+
+    # Variable file to keep values out of the template (optional but cleaner)
+    cat > values.auto.pkrvars.hcl <<HCL
+location           = "$(location)"
+resource_group     = "$(resourceGroup)"
+managed_image_name = "$(managedImageName)"
+
+image_publisher = "$(imagePublisher)"
+image_offer     = "$(imageOffer)"
+image_sku       = "$(imageSku)"
+HCL
+  displayName: 'Write Packer HCL2 files'
+
+# 3) (Optional) Create the RG if it doesn't exist
+- task: AzureCLI@2
+  displayName: 'Create resource group (idempotent)'
+  inputs:
+    azureSubscription: $(azureServiceConnection)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      set -euo pipefail
+      az group create -n "$(resourceGroup)" -l "$(location)" -o table
+
+# 4) packer init / validate / build INSIDE AzureCLI@2 (uses the Service Connection login)
+- task: AzureCLI@2
+  displayName: 'Packer init, validate, build (Azure CLI auth)'
+  inputs:
+    azureSubscription: $(azureServiceConnection)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      set -euo pipefail
+
+      echo "[INFO] packer init (installs Azure plugin declared in required_plugins)..."
+      packer init .
+
+      echo "[INFO] Show required & installed plugins (debugging aid)..."
+      packer plugins required . || true
+
+      echo "[INFO] packer validate..."
+      packer validate .
+
+      echo "[INFO] packer build..."
+      packer build .
