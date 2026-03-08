@@ -20,6 +20,7 @@ stages:
       - bash: echo $(Build.BuildId)
       - bash: echo $(Build.SourcesDirectory)
       - bash: ls -al $(Build.SourcesDirectory)
+      - bash: cd $(Build.SourcesDirectory)/img && ls -al
       - bash: echo $(System.DefaultWorkingDirectory)
   - job: SecondJobs
     steps:
