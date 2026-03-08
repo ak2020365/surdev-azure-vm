@@ -1,0 +1,27 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage:
+  jobs:
+  - job: FirstJob
+    steps:
+      - bash: echo Build firstjob
+      - bash: echo $(PipeLineLevelVariables)
+      - bash: echo $(Build.BuildNumber)
+      - bash: echo $(Build.BuildId)
+      - bash: echo $(Build.BuildSourceDirectory)
+  - job: SecondJobs
+    steps:
+    - bash: echo $(System.DefaultWorkingDirectory)
+
+
+
